@@ -463,16 +463,42 @@ function acknowledgeInstruction() {
   store.instructionModal = createDefaultInstructionModal();
   persistStore();
 
+  if (launchActionInterfaceForCurrentStep()) {
+    return;
+  }
+
+  render();
+}
+
+function launchActionInterfaceForCurrentStep() {
   const save = getActiveSave();
+
+  if (store.view === "setup") {
+    render();
+    window.setTimeout(() => {
+      const firstInput = document.querySelector("input[name='player-name']");
+      firstInput?.focus();
+    }, 0);
+    return true;
+  }
+
+  if (store.view === "game" && save?.phase === "fighterCreation") {
+    const nextCreator = getNextCreator(save);
+    if (nextCreator) {
+      openFighterModal();
+      return true;
+    }
+  }
+
   if (store.view === "game" && save?.phase === "fighterScoring") {
     const task = getNextScoringTask(save);
     if (task) {
       openScoreModal(task.fighter.id);
-      return;
+      return true;
     }
   }
 
-  render();
+  return false;
 }
 
 function buildRevealQueue(save) {
