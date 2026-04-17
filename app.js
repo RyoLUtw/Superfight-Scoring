@@ -935,16 +935,55 @@ function renderSetupView() {
 
 function renderGameView(save) {
   const leaderboard = rankPlayers(save.players);
+  const phaseIndex = save.phase === "fighterCreation" ? 1 : save.phase === "opponentSelection" ? 2 : 3;
+  const stepIndicator = renderStepIndicator(save, phaseIndex);
 
   if (save.phase === "fighterCreation") {
-    return renderFighterCreationView(save);
+    return `
+      <div class="game-grid streamlined-grid">
+        ${stepIndicator}
+        ${renderFighterCreationView(save)}
+      </div>
+    `;
   }
 
   if (save.phase === "opponentSelection") {
-    return renderOpponentSelectionView(save);
+    return `
+      <div class="game-grid streamlined-grid">
+        ${stepIndicator}
+        ${renderOpponentSelectionView(save)}
+      </div>
+    `;
   }
 
-  return renderRevealView(save, leaderboard);
+  return `
+    <div class="reveal-grid streamlined-grid">
+      ${stepIndicator}
+      ${renderRevealView(save, leaderboard)}
+    </div>
+  `;
+}
+
+function renderStepIndicator(save, phaseIndex) {
+  const phaseLabelText =
+    save.phase === "fighterCreation"
+      ? "Create + score fighters"
+      : save.phase === "opponentSelection"
+        ? "Pick opponents"
+        : "Reveal battles";
+
+  return `
+    <section class="panel prompt-card step-indicator">
+      <div class="fighter-headline">
+        <div>
+          <span class="mini-label">Round ${save.roundNumber}</span>
+          <h3 class="card-title">Step ${phaseIndex} of 3: ${phaseLabelText}</h3>
+        </div>
+        <span class="tag">${save.players.length} players</span>
+      </div>
+      <p class="muted-text">Only actions for the current step are shown below.</p>
+    </section>
+  `;
 }
 
 function renderFighterCreationView(save) {
@@ -954,7 +993,6 @@ function renderFighterCreationView(save) {
     : `<div class="empty-state">No fighters yet. Use the + button to let ${escapeHtml(nextCreator?.name || "the next player")} build the next combatant.</div>`;
 
   return `
-    <div class="game-grid">
       <section class="panel stage-panel">
         <div class="stage-header">
           <div>
@@ -966,32 +1004,14 @@ function renderFighterCreationView(save) {
           </div>
           <button id="openFighterModalButton" class="icon-button" type="button" aria-label="Add fighter" ${nextCreator ? "" : "disabled"}>+</button>
         </div>
-        <div class="stage-cards">
-          <article class="info-card">
-            <span class="mini-label">Fighters built</span>
-            <p class="stat-value">${save.fighters.length} / ${save.players.length}</p>
-          </article>
-          <article class="info-card">
-            <span class="mini-label">Scoring ready</span>
-            <p class="stat-value">${save.fighters.filter((fighter) => isFighterScored(save, fighter)).length}</p>
-          </article>
-          <article class="info-card">
-            <span class="mini-label">Next creator</span>
-            <p class="stat-value">${escapeHtml(nextCreator?.name || "Done")}</p>
-          </article>
-        </div>
         <div class="stage-banner ${canAdvanceToStageTwo(save) ? "success" : ""}">
-          ${
-            canAdvanceToStageTwo(save)
-              ? "All fighters have their hidden averages. Stage 2 is ready."
-              : "Each fighter needs one owner, one character, two attributes, and scores from every other player."
-          }
+          ${save.fighters.length} / ${save.players.length} fighters created ·
+          ${save.fighters.filter((fighter) => isFighterScored(save, fighter)).length} fully scored
         </div>
         <div class="fighter-list" style="margin-top: 20px;">
           ${fighterCards}
         </div>
       </section>
-    </div>
   `;
 }
 
@@ -1065,7 +1085,6 @@ function renderOpponentSelectionView(save) {
   const selectedOpponentId = store.opponentDraft.fighterId === chooser?.id ? store.opponentDraft.opponentId : null;
 
   return `
-    <div class="game-grid">
       <section class="panel stage-panel">
         <div class="stage-header">
           <div>
@@ -1107,30 +1126,7 @@ function renderOpponentSelectionView(save) {
             Confirm Opponent
           </button>
         </div>
-        <div class="fighter-list" style="margin-top: 24px;">
-          ${save.fighters
-            .map((fighter) => {
-              const owner = getPlayerById(save, fighter.ownerId);
-              const chosen = fighter.opponentChoiceId ? getFighterById(save, fighter.opponentChoiceId) : null;
-
-              return `
-                <article class="fighter-card">
-                  <div class="fighter-headline">
-                    <div>
-                      <span class="mini-label">${escapeHtml(owner?.name || "Unknown")}</span>
-                      <h3 class="fighter-name">${escapeHtml(fighter.character)}</h3>
-                    </div>
-                    <span class="status-pill ${chosen ? "ready" : "pending"}">
-                      ${chosen ? `Targets ${escapeHtml(chosen.character)}` : "Waiting"}
-                    </span>
-                  </div>
-                </article>
-              `;
-            })
-            .join("")}
-        </div>
       </section>
-    </div>
   `;
 }
 
@@ -1139,10 +1135,7 @@ function renderRevealView(save, leaderboard) {
   const fighterA = currentMatch ? getFighterById(save, currentMatch.fighterAId) : null;
   const fighterB = currentMatch ? getFighterById(save, currentMatch.fighterBId) : null;
   const allRevealed = save.revealQueue.length > 0 && save.revealQueue.every((match) => match.revealed);
-  const showResultsSidebar = Boolean(currentMatch?.revealed || allRevealed);
-
   return `
-    <div class="reveal-grid">
       <section class="panel match-panel">
         <div class="match-header">
           <div>
@@ -1166,12 +1159,7 @@ function renderRevealView(save, leaderboard) {
             : `<div class="empty-state">No reveal data is available yet.</div>`
         }
       </section>
-      ${
-        showResultsSidebar
-          ? renderRevealSidebar(save, leaderboard, allRevealed)
-          : ""
-      }
-    </div>
+      ${allRevealed ? renderRevealSidebar(save, leaderboard, allRevealed) : ""}
   `;
 }
 

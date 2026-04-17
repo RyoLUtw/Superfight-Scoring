@@ -173,6 +173,14 @@ select {
   grid-template-columns: minmax(0, 1.3fr) minmax(300px, 0.7fr);
 }
 
+.streamlined-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.step-indicator {
+  padding: 16px 20px;
+}
+
 .hero-copy p,
 .setup-copy p {
   color: var(--muted);
