@@ -45,6 +45,8 @@ function createDefaultStore() {
     setupDraft: createSetupDraft(DEFAULT_PLAYER_COUNT),
     fighterModal: createDefaultFighterModal(),
     scoreModal: createDefaultScoreModal(),
+    instructionModal: createDefaultInstructionModal(),
+    seenInstructionKeys: [],
     opponentDraft: {
       fighterId: null,
       opponentId: null,
@@ -82,6 +84,15 @@ function createDefaultScoreModal() {
   };
 }
 
+function createDefaultInstructionModal() {
+  return {
+    isOpen: false,
+    key: null,
+    playerName: "",
+    actionText: "",
+  };
+}
+
 function loadStore() {
   const fallback = createDefaultStore();
 
@@ -108,6 +119,8 @@ function normalizeStore(input) {
     setupDraft: normalizeSetupDraft(input?.setupDraft),
     fighterModal: { ...createDefaultFighterModal(), ...(input?.fighterModal || {}) },
     scoreModal: normalizeScoreModal(input?.scoreModal),
+    instructionModal: { ...createDefaultInstructionModal(), ...(input?.instructionModal || {}) },
+    seenInstructionKeys: Array.isArray(input?.seenInstructionKeys) ? [...input.seenInstructionKeys] : [],
     opponentDraft: {
       fighterId: input?.opponentDraft?.fighterId ?? null,
       opponentId: input?.opponentDraft?.opponentId ?? null,
@@ -215,7 +228,7 @@ function normalizeMatch(match) {
 }
 
 function normalizePhase(phase) {
-  const valid = ["fighterCreation", "opponentSelection", "reveal"];
+  const valid = ["fighterCreation", "fighterScoring", "opponentSelection", "reveal"];
   return valid.includes(phase) ? phase : "fighterCreation";
 }
 
@@ -317,12 +330,149 @@ function canAdvanceToStageTwo(save) {
   );
 }
 
+function getNextScoringTask(save) {
+  for (const fighter of save.fighters) {
+    const scorer = save.players.find((player) => {
+      return player.id !== fighter.ownerId && !fighter.scores.some((score) => score.scorerId === player.id);
+    });
+
+    if (scorer) {
+      return { fighter, scorer };
+    }
+  }
+
+  return null;
+}
+
 function getCurrentChooser(save) {
   return save.fighters.find((fighter) => !fighter.opponentChoiceId) || null;
 }
 
 function allOpponentsChosen(save) {
   return save.fighters.length > 0 && save.fighters.every((fighter) => fighter.opponentChoiceId);
+}
+
+function clearInstructionState() {
+  store.instructionModal = createDefaultInstructionModal();
+  store.seenInstructionKeys = [];
+}
+
+function getInstructionForCurrentStep() {
+  const save = getActiveSave();
+
+  if (store.view === "setup") {
+    return {
+      key: "setup-players-info",
+      playerName: "All players",
+      actionText: "enter player info.",
+    };
+  }
+
+  if (store.view !== "game" || !save) {
+    return null;
+  }
+
+  if (save.phase === "fighterCreation") {
+    const nextCreator = getNextCreator(save);
+    if (!nextCreator) {
+      return null;
+    }
+
+    return {
+      key: `create-${save.roundNumber}-${nextCreator.id}-${save.fighters.length}`,
+      playerName: nextCreator.name,
+      actionText: "create your fighter.",
+    };
+  }
+
+  if (save.phase === "fighterScoring") {
+    const task = getNextScoringTask(save);
+    if (!task) {
+      return null;
+    }
+
+    return {
+      key: `score-${save.roundNumber}-${task.fighter.id}-${task.scorer.id}`,
+      playerName: task.scorer.name,
+      actionText: `score ${task.fighter.character}.`,
+    };
+  }
+
+  if (save.phase === "opponentSelection") {
+    const chooser = getCurrentChooser(save);
+    const chooserOwner = chooser ? getPlayerById(save, chooser.ownerId) : null;
+
+    if (!chooserOwner) {
+      return null;
+    }
+
+    return {
+      key: `opponent-${save.roundNumber}-${chooser.id}`,
+      playerName: chooserOwner.name,
+      actionText: "select an opponent.",
+    };
+  }
+
+  if (save.phase === "reveal") {
+    const match = save.revealQueue[save.currentRevealIndex];
+    if (!match || match.revealed) {
+      return null;
+    }
+
+    return {
+      key: `reveal-${save.roundNumber}-${save.currentRevealIndex}`,
+      playerName: "All players",
+      actionText: "reveal fight result.",
+    };
+  }
+
+  return null;
+}
+
+function maybeOpenInstructionModal() {
+  const instruction = getInstructionForCurrentStep();
+
+  if (!instruction) {
+    return;
+  }
+
+  if (store.instructionModal.isOpen || store.fighterModal.isOpen || store.scoreModal.isOpen) {
+    return;
+  }
+
+  if (store.seenInstructionKeys.includes(instruction.key)) {
+    return;
+  }
+
+  store.instructionModal = {
+    isOpen: true,
+    key: instruction.key,
+    playerName: instruction.playerName,
+    actionText: instruction.actionText,
+  };
+  persistStore();
+}
+
+function acknowledgeInstruction() {
+  const key = store.instructionModal.key;
+
+  if (key && !store.seenInstructionKeys.includes(key)) {
+    store.seenInstructionKeys.push(key);
+  }
+
+  store.instructionModal = createDefaultInstructionModal();
+  persistStore();
+
+  const save = getActiveSave();
+  if (store.view === "game" && save?.phase === "fighterScoring") {
+    const task = getNextScoringTask(save);
+    if (task) {
+      openScoreModal(task.fighter.id);
+      return;
+    }
+  }
+
+  render();
 }
 
 function buildRevealQueue(save) {
@@ -459,6 +609,7 @@ function startNewRound() {
   store.scoreModal = createDefaultScoreModal();
   store.fighterModal = createDefaultFighterModal();
   store.opponentDraft = { fighterId: null, opponentId: null };
+  clearInstructionState();
   store.view = "game";
   persistStore();
   render();
@@ -478,6 +629,7 @@ function beginNewGame() {
   }
 
   store.view = "setup";
+  clearInstructionState();
   persistStore();
   render();
 }
@@ -497,6 +649,7 @@ function loadLastProgress() {
 
   store.activeSaveId = latest.id;
   store.view = "game";
+  clearInstructionState();
   persistStore();
   render();
 }
@@ -533,6 +686,7 @@ function submitSetup() {
   store.fighterModal = createDefaultFighterModal();
   store.scoreModal = createDefaultScoreModal();
   store.opponentDraft = { fighterId: null, opponentId: null };
+  clearInstructionState();
   persistStore();
   render();
 }
@@ -589,6 +743,10 @@ function createFighter() {
       },
       opponentChoiceId: null,
     });
+
+    if (activeSave.fighters.length === activeSave.players.length) {
+      activeSave.phase = "fighterScoring";
+    }
   });
 
   store.fighterModal = createDefaultFighterModal();
@@ -603,19 +761,21 @@ function openScoreModal(fighterId) {
     return;
   }
 
-  const scorerSequence = save.players
-    .filter((player) => player.id !== fighter.ownerId)
-    .map((player) => player.id);
+  const scorerId = save.players.find((player) => {
+    return player.id !== fighter.ownerId && !fighter.scores.some((score) => score.scorerId === player.id);
+  })?.id;
 
-  const currentIndex = getNextScoreIndex(fighter, scorerSequence);
-  const scorerId = scorerSequence[currentIndex] ?? scorerSequence[0] ?? null;
+  if (!scorerId) {
+    return;
+  }
+
   const existingScore = fighter.scores.find((score) => score.scorerId === scorerId);
 
   store.scoreModal = {
     isOpen: true,
     fighterId,
-    scorerSequence,
-    currentIndex,
+    scorerSequence: [scorerId],
+    currentIndex: 0,
     offense: existingScore?.offense ?? DEFAULT_SLIDER_VALUE,
     defense: existingScore?.defense ?? DEFAULT_SLIDER_VALUE,
     error: "",
@@ -623,14 +783,6 @@ function openScoreModal(fighterId) {
 
   persistStore();
   render();
-}
-
-function getNextScoreIndex(fighter, scorerSequence) {
-  const missingIndex = scorerSequence.findIndex((scorerId) => {
-    return !fighter.scores.some((score) => score.scorerId === scorerId);
-  });
-
-  return missingIndex === -1 ? 0 : missingIndex;
 }
 
 function closeScoreModal() {
@@ -683,28 +835,7 @@ function submitScoreStep() {
     }
   });
 
-  const nextIndex = store.scoreModal.currentIndex + 1;
-
-  if (nextIndex >= store.scoreModal.scorerSequence.length) {
-    store.scoreModal = createDefaultScoreModal();
-    persistStore();
-    render();
-    return;
-  }
-
-  const refreshedSave = getActiveSave();
-  const refreshedFighter = refreshedSave ? getFighterById(refreshedSave, fighter.id) : null;
-  const nextScorerId = store.scoreModal.scorerSequence[nextIndex];
-  const nextExistingScore = refreshedFighter?.scores.find((score) => score.scorerId === nextScorerId);
-
-  store.scoreModal = {
-    ...store.scoreModal,
-    currentIndex: nextIndex,
-    offense: nextExistingScore?.offense ?? DEFAULT_SLIDER_VALUE,
-    defense: nextExistingScore?.defense ?? DEFAULT_SLIDER_VALUE,
-    error: "",
-  };
-
+  store.scoreModal = createDefaultScoreModal();
   persistStore();
   render();
 }
@@ -785,6 +916,7 @@ function updateSetupDraftName(index, value) {
 
 function render() {
   appRoot.innerHTML = renderView();
+  maybeOpenInstructionModal();
   renderModal();
   bindViewEvents();
 }
@@ -810,7 +942,7 @@ function renderHomeView() {
     <section class="panel hero-panel">
       <div class="hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow">Round Flow</p>
+          <p class="eyebrow">Step 1 of 6 · Start Game</p>
           <h2 class="hero-title">Create fighters, judge them in secret, then reveal each showdown.</h2>
           <p>
             Every round, each player builds one fighter, the rest of the table scores that fighter's offense and defense,
@@ -893,7 +1025,7 @@ function renderSetupView() {
     <section class="panel setup-panel">
       <div class="setup-grid">
         <div class="setup-copy">
-          <p class="eyebrow">Game Setup</p>
+          <p class="eyebrow">Step 2 of 6 · Players Info</p>
           <h2 class="section-title">Choose the table size and name every player.</h2>
           <p>
             Submitting this form creates a new save game. Future rounds stay inside that same save, so the running victory
@@ -935,7 +1067,14 @@ function renderSetupView() {
 
 function renderGameView(save) {
   const leaderboard = rankPlayers(save.players);
-  const phaseIndex = save.phase === "fighterCreation" ? 1 : save.phase === "opponentSelection" ? 2 : 3;
+  const phaseIndex =
+    save.phase === "fighterCreation"
+      ? 3
+      : save.phase === "fighterScoring"
+        ? 4
+        : save.phase === "opponentSelection"
+          ? 5
+          : 6;
   const stepIndicator = renderStepIndicator(save, phaseIndex);
 
   if (save.phase === "fighterCreation") {
@@ -956,6 +1095,15 @@ function renderGameView(save) {
     `;
   }
 
+  if (save.phase === "fighterScoring") {
+    return `
+      <div class="game-grid streamlined-grid">
+        ${stepIndicator}
+        ${renderFighterScoringView(save)}
+      </div>
+    `;
+  }
+
   return `
     <div class="reveal-grid streamlined-grid">
       ${stepIndicator}
@@ -967,7 +1115,9 @@ function renderGameView(save) {
 function renderStepIndicator(save, phaseIndex) {
   const phaseLabelText =
     save.phase === "fighterCreation"
-      ? "Create + score fighters"
+      ? "Create fighters"
+      : save.phase === "fighterScoring"
+        ? "Score fighters"
       : save.phase === "opponentSelection"
         ? "Pick opponents"
         : "Reveal battles";
@@ -977,7 +1127,7 @@ function renderStepIndicator(save, phaseIndex) {
       <div class="fighter-headline">
         <div>
           <span class="mini-label">Round ${save.roundNumber}</span>
-          <h3 class="card-title">Step ${phaseIndex} of 3: ${phaseLabelText}</h3>
+          <h3 class="card-title">Step ${phaseIndex} of 6: ${phaseLabelText}</h3>
         </div>
         <span class="tag">${save.players.length} players</span>
       </div>
@@ -989,7 +1139,7 @@ function renderStepIndicator(save, phaseIndex) {
 function renderFighterCreationView(save) {
   const nextCreator = getNextCreator(save);
   const fighterCards = save.fighters.length
-    ? save.fighters.map((fighter) => renderFighterCard(save, fighter)).join("")
+    ? save.fighters.map((fighter) => renderCreationFighterCard(save, fighter)).join("")
     : `<div class="empty-state">No fighters yet. Use the + button to let ${escapeHtml(nextCreator?.name || "the next player")} build the next combatant.</div>`;
 
   return `
@@ -997,7 +1147,7 @@ function renderFighterCreationView(save) {
         <div class="stage-header">
           <div>
             <p class="eyebrow">Stage 1</p>
-            <h2 class="section-title">Fighter creation and secret scoring</h2>
+            <h2 class="section-title">Fighter creation</h2>
             <p class="stage-subtitle">
               Round ${save.roundNumber}. ${nextCreator ? `${escapeHtml(nextCreator.name)} is up to create the next fighter.` : "All fighters are created."}
             </p>
@@ -1006,12 +1156,30 @@ function renderFighterCreationView(save) {
         </div>
         <div class="stage-banner ${canAdvanceToStageTwo(save) ? "success" : ""}">
           ${save.fighters.length} / ${save.players.length} fighters created ·
-          ${save.fighters.filter((fighter) => isFighterScored(save, fighter)).length} fully scored
+          once complete, scoring starts automatically
         </div>
         <div class="fighter-list" style="margin-top: 20px;">
           ${fighterCards}
         </div>
       </section>
+  `;
+}
+
+function renderCreationFighterCard(save, fighter) {
+  const owner = getPlayerById(save, fighter.ownerId);
+  return `
+    <article class="fighter-card">
+      <div class="fighter-headline">
+        <div>
+          <span class="mini-label">Created by ${escapeHtml(owner?.name || "Unknown")}</span>
+          <h3 class="fighter-name">${escapeHtml(fighter.character)}</h3>
+        </div>
+        <span class="status-pill ready">Created</span>
+      </div>
+      <div class="fighter-attrs">
+        ${fighter.attributes.map((attribute) => `<span class="pill">${escapeHtml(attribute)}</span>`).join("")}
+      </div>
+    </article>
   `;
 }
 
@@ -1044,6 +1212,49 @@ function renderFighterCard(save, fighter) {
         </span>
       </div>
     </article>
+  `;
+}
+
+function renderFighterScoringView(save) {
+  const task = getNextScoringTask(save);
+
+  if (!task) {
+    return `
+      <section class="panel stage-panel">
+        <div class="empty-state">All fighters are scored. Moving to opponent selection.</div>
+      </section>
+    `;
+  }
+
+  const owner = getPlayerById(save, task.fighter.ownerId);
+  const scoredCount = fighterScoreCount(save, task.fighter);
+  const neededScores = Math.max(save.players.length - 1, 0);
+
+  return `
+    <section class="panel stage-panel">
+      <div class="stage-header">
+        <div>
+          <p class="eyebrow">Stage 2</p>
+          <h2 class="section-title">Fighter scoring</h2>
+          <p class="stage-subtitle">${escapeHtml(task.scorer.name)} is up to score ${escapeHtml(task.fighter.character)}.</p>
+        </div>
+      </div>
+      <article class="fighter-card">
+        <div class="fighter-headline">
+          <div>
+            <span class="mini-label">Created by ${escapeHtml(owner?.name || "Unknown")}</span>
+            <h3 class="fighter-name">${escapeHtml(task.fighter.character)}</h3>
+          </div>
+          <span class="status-pill pending">${scoredCount}/${neededScores} judges</span>
+        </div>
+        <div class="fighter-attrs">
+          ${task.fighter.attributes.map((attribute) => `<span class="pill">${escapeHtml(attribute)}</span>`).join("")}
+        </div>
+        <div class="inline-actions" style="margin-top: 16px;">
+          <button id="startScoringTurnButton" class="primary-button" type="button" data-score-fighter-id="${task.fighter.id}">Start Scoring</button>
+        </div>
+      </article>
+    </section>
   `;
 }
 
@@ -1088,7 +1299,7 @@ function renderOpponentSelectionView(save) {
       <section class="panel stage-panel">
         <div class="stage-header">
           <div>
-            <p class="eyebrow">Stage 2</p>
+            <p class="eyebrow">Stage 3</p>
             <h2 class="section-title">Choose opponents</h2>
             <p class="stage-subtitle">
               ${
@@ -1139,7 +1350,7 @@ function renderRevealView(save, leaderboard) {
       <section class="panel match-panel">
         <div class="match-header">
           <div>
-            <p class="eyebrow">Fight Reveal</p>
+            <p class="eyebrow">Stage 4 · Fight Reveal</p>
             <h2 class="section-title">${
               currentMatch ? `Match ${save.currentRevealIndex + 1} of ${save.revealQueue.length}` : "No matches queued"
             }</h2>
@@ -1305,6 +1516,12 @@ function renderResultExplanation(fighterA, fighterB, result) {
 }
 
 function renderModal() {
+  if (store.instructionModal.isOpen) {
+    modalRoot.innerHTML = renderInstructionModal();
+    bindInstructionModalEvents();
+    return;
+  }
+
   if (store.fighterModal.isOpen) {
     modalRoot.innerHTML = renderFighterModal();
     bindFighterModalEvents();
@@ -1318,6 +1535,26 @@ function renderModal() {
   }
 
   modalRoot.innerHTML = "";
+}
+
+function renderInstructionModal() {
+  return `
+    <div class="modal-overlay">
+      <section class="modal-panel instruction-panel" role="dialog" aria-modal="true" aria-labelledby="instruction-modal-title">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Turn Instruction</p>
+            <h2 id="instruction-modal-title" class="modal-title">${escapeHtml(store.instructionModal.playerName)}, ${escapeHtml(
+    store.instructionModal.actionText
+  )}</h2>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="ackInstructionButton" class="primary-button" type="button">OK</button>
+        </div>
+      </section>
+    </div>
+  `;
 }
 
 function renderFighterModal() {
@@ -1493,6 +1730,11 @@ function bindFighterModalEvents() {
   closeButton?.addEventListener("click", closeFighterModal);
 }
 
+function bindInstructionModalEvents() {
+  const acknowledgeButton = document.getElementById("ackInstructionButton");
+  acknowledgeButton?.addEventListener("click", acknowledgeInstruction);
+}
+
 function bindScoreModalEvents() {
   const offenseSlider = document.getElementById("offenseSlider");
   const defenseSlider = document.getElementById("defenseSlider");
@@ -1551,7 +1793,11 @@ function rankPlayers(players) {
 
 function phaseLabel(phase) {
   if (phase === "fighterCreation") {
-    return "Stage 1";
+    return "Fighter creation";
+  }
+
+  if (phase === "fighterScoring") {
+    return "Fighter scoring";
   }
 
   if (phase === "opponentSelection") {

@@ -564,6 +564,16 @@ button:disabled {
   box-shadow: var(--shadow);
 }
 
+.instruction-panel {
+  width: min(100%, 560px);
+  text-align: center;
+}
+
+.instruction-panel .modal-header {
+  justify-content: center;
+  margin-bottom: 10px;
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;
