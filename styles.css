@@ -173,6 +173,72 @@ select {
   grid-template-columns: minmax(0, 1.3fr) minmax(300px, 0.7fr);
 }
 
+.streamlined-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.step-indicator {
+  padding: 16px 20px;
+}
+
+.rating-card-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.rating-fighter-card {
+  border-radius: 14px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.75);
+  background: #000;
+}
+
+.rating-card-title {
+  background: #f7f7f7;
+  color: #000;
+  padding: 14px 16px;
+  font-size: 1.8rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.rating-card-body {
+  background: #000;
+  color: #fff;
+  padding: 14px 16px 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.rating-card-attrs {
+  display: grid;
+  gap: 6px;
+  font-size: 1.3rem;
+}
+
+.rating-control {
+  display: grid;
+  gap: 6px;
+}
+
+.rating-control label {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 700;
+}
+
+.opponent-card-button {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.opponent-card-button.is-selected .rating-fighter-card {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.25);
+}
+
 .hero-copy p,
 .setup-copy p {
   color: var(--muted);
@@ -554,6 +620,16 @@ button:disabled {
     var(--panel-strong);
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
+}
+
+.instruction-panel {
+  width: min(100%, 560px);
+  text-align: center;
+}
+
+.instruction-panel .modal-header {
+  justify-content: center;
+  margin-bottom: 10px;
 }
 
 .modal-header {
